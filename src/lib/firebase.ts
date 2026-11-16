@@ -16,12 +16,15 @@ const app = initializeApp({
 });
 
 // App Check is required by the hackathon rules. Debug tokens are allowed in development.
-if (cloudConfigured && env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY) {
-  if (env.DEV && env.VITE_APPCHECK_DEBUG === "true") {
+// In local development the debug provider stands in for reCAPTCHA: the SDK prints a debug token in the
+// browser console once, and that token is registered under App Check > Manage debug tokens.
+const appCheckDebug = env.DEV && env.VITE_APPCHECK_DEBUG === "true";
+if (cloudConfigured && (env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY || appCheckDebug)) {
+  if (appCheckDebug) {
     (self as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN: boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
   }
   initializeAppCheck(app, {
-    provider: new ReCaptchaEnterpriseProvider(env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY),
+    provider: new ReCaptchaEnterpriseProvider(env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY || "debug-only"),
     isTokenAutoRefreshEnabled: true,
   });
 }
