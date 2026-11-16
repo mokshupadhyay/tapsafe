@@ -21,7 +21,9 @@ const app = initializeApp({
 const appCheckDebug = env.DEV && env.VITE_APPCHECK_DEBUG === "true";
 if (cloudConfigured && (env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY || appCheckDebug)) {
   if (appCheckDebug) {
-    (self as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN: boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+    // A fixed token from .env.local lets every local browser share one registered token.
+    (self as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN: string | boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN =
+      env.VITE_APPCHECK_DEBUG_TOKEN || true;
   }
   initializeAppCheck(app, {
     provider: new ReCaptchaEnterpriseProvider(env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY || "debug-only"),
