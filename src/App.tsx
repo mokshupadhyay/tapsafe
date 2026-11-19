@@ -2,9 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { compare, formatMinor, parseAmount, spokenAmount } from "./lib/amount";
 import { speak, tone } from "./lib/feedback";
 import { captureFrom, fileToImage, type CapturedImage } from "./lib/image";
-import { downloadNano, nanoStatus, needsSecondOpinion, readInCloud, readOnDevice, type ReadResult } from "./lib/reader";
+import {
+  downloadNano,
+  draftLetter,
+  nanoStatus,
+  needsSecondOpinion,
+  readBill,
+  readInCloud,
+  readOnDevice,
+  type BillResult,
+  type ReadResult,
+} from "./lib/reader";
+import { checkBill, type BillCheck } from "./lib/bill";
 import { drawSample, SAMPLES } from "./lib/samples";
-import { cloudConfigured } from "./lib/firebase";
+import { cloudConfigured, proModelName } from "./lib/firebase";
 
 type Phase = "idle" | "reading_device" | "awaiting_consent" | "reading_cloud" | "done" | "error";
 
@@ -13,6 +24,8 @@ interface Outcome {
   headline: string;
   detail: string;
   spoken: string;
+  /** The terminal disagreed with the expected amount, so a dispute note makes sense. */
+  canDispute?: boolean;
 }
 
 interface HistoryItem {
@@ -40,6 +53,11 @@ export default function App() {
   const [nano, setNano] = useState<string>("checking");
   const [progress, setProgress] = useState<number | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [bill, setBill] = useState<(BillResult & { check: BillCheck }) | null>(null);
+  const [billBusy, setBillBusy] = useState(false);
+  const [billError, setBillError] = useState("");
+  const [letter, setLetter] = useState("");
+  const [letterBusy, setLetterBusy] = useState(false);
 
   useEffect(() => {
     nanoStatus().then(setNano);
@@ -47,9 +65,12 @@ export default function App() {
 
   const expectedMinor = parseAmount(expected)?.minor ?? null;
 
+  // The expected amount a scan was started with. Samples set it and scan in the same click, so state would be stale.
+  const scanExpected = useRef<number | null>(null);
+
   const finish = useCallback(
     (final: ReadResult, other: ReadResult | null) => {
-      const o = describe(final, other, expectedMinor);
+      const o = describe(final, other, scanExpected.current);
       setOutcome(o);
       setPhase("done");
       tone(o.tone);
@@ -58,7 +79,7 @@ export default function App() {
         [{ at: new Date().toLocaleTimeString(), text: o.headline, source: final.source, ms: final.ms, tone: o.tone }, ...h].slice(0, 8),
       );
     },
-    [expectedMinor, voice],
+    [voice],
   );
 
   const askCloud = useCallback(
@@ -79,18 +100,21 @@ export default function App() {
   );
 
   const scan = useCallback(
-    async (img: CapturedImage) => {
+    async (img: CapturedImage, expectedOverride?: number | null) => {
+      const exp = expectedOverride !== undefined ? expectedOverride : expectedMinor;
+      scanExpected.current = exp;
       setImage(img);
       setDevice(null);
       setCloud(null);
       setOutcome(null);
       setError("");
+      setLetter("");
       setPhase("reading_device");
       tone("info");
       try {
         const d = await readOnDevice(img);
         setDevice(d);
-        const why = needsSecondOpinion(d, expectedMinor);
+        const why = needsSecondOpinion(d, exp);
         if (!why) return finish(d, null);
         setReason(why);
         if (alwaysCloud) return askCloud(img, d);
@@ -105,6 +129,66 @@ export default function App() {
     },
     [alwaysCloud, askCloud, expectedMinor, finish, voice],
   );
+
+  async function scanBill(file: File) {
+    setBillBusy(true);
+    setBillError("");
+    setBill(null);
+    speak("Reading the bill in the cloud.", voice);
+    try {
+      const r = await readBill(captureFrom(await fileToImage(file)));
+      const check = checkBill(r.bill);
+      setBill({ ...r, check });
+      const currency = r.bill.currency || "INR";
+      if (check.totalMinor !== null && r.bill.readable && check.adds_up) {
+        setExpected((check.totalMinor / 100).toFixed(2));
+        tone(check.flags.length ? "info" : "ok");
+        speak(
+          `The bill total is ${spokenAmount(check.totalMinor, currency)}, and the lines add up.` +
+            (check.flags.length ? ` Note: ${check.flags.join(" ")}` : "") +
+            " I've set that as the amount you expect. Now point at the terminal.",
+          voice,
+        );
+      } else {
+        tone("alert");
+        speak(
+          `I couldn't confirm the bill total. ${check.flags[0] ?? "Some amounts weren't clear."} Enter the amount yourself or ask for the bill to be read out.`,
+          voice,
+        );
+      }
+    } catch (e) {
+      setBillError((e as Error).message);
+      tone("alert");
+      speak((e as Error).message, voice);
+    } finally {
+      setBillBusy(false);
+    }
+  }
+
+  async function writeLetter() {
+    const final = cloud ?? device;
+    const exp = scanExpected.current;
+    if (!final || exp === null) return;
+    const amt = parseAmount(final.reading.amountText);
+    const currency = final.reading.currency || amt?.currency || "INR";
+    setLetterBusy(true);
+    try {
+      const text = await draftLetter({
+        merchant: final.reading.merchant || bill?.bill.merchant || "",
+        when: new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
+        expected: formatMinor(exp, currency),
+        charged: amt ? formatMinor(amt.minor, currency) : final.reading.amountText,
+        screenType: final.reading.screenType,
+      });
+      setLetter(text);
+      speak("The note is ready. You can copy it or have it read out.", voice);
+    } catch (e) {
+      setLetter("");
+      setError((e as Error).message);
+    } finally {
+      setLetterBusy(false);
+    }
+  }
 
   async function toggleCamera() {
     if (cameraOn) {
@@ -171,6 +255,55 @@ export default function App() {
         <p id="expect-help" className="hint">
           If you enter it, TapSafe tells you straight away whether the terminal matches.
         </p>
+        <div className="row">
+          <label className={`button ${!cloudConfigured || billBusy ? "disabled" : ""}`}>
+            {billBusy ? "Reading the bill…" : "Or photograph the bill"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png"
+              capture="environment"
+              hidden
+              disabled={!cloudConfigured || billBusy}
+              aria-describedby="bill-help"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) scanBill(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+        <p id="bill-help" className="hint">
+          Long bills are read by a larger cloud model ({proModelName}), so the bill photo leaves your device. TapSafe re-adds every line
+          itself before trusting the total.
+        </p>
+        {billError && <p className="hint alert-text">{billError}</p>}
+        {bill && (
+          <div className={`bill ${bill.check.adds_up ? "ok" : "alert"}`} aria-live="polite">
+            <p className="headline-sm">
+              {bill.bill.merchant || "Bill"}:{" "}
+              {bill.check.totalMinor !== null ? formatMinor(bill.check.totalMinor, bill.bill.currency || "INR") : "total unclear"}{" "}
+              {bill.check.adds_up ? "· lines add up" : "· doesn't add up"}
+            </p>
+            <ul>
+              {bill.bill.lines.map((l, i) => (
+                <li key={i} className={l.kind !== "item" ? "fee" : ""}>
+                  <span>{l.label}</span> <span>{l.amountText}</span>
+                </li>
+              ))}
+            </ul>
+            {bill.check.flags.length > 0 && (
+              <ul className="flags">
+                {bill.check.flags.map((f, i) => (
+                  <li key={i}>{f}</li>
+                ))}
+              </ul>
+            )}
+            <p className="route">
+              <span className="badge in_cloud">Cloud · {proModelName}</span> {bill.ms} ms
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="panel" aria-labelledby="scan-h">
@@ -213,7 +346,7 @@ export default function App() {
                 disabled={busy}
                 onClick={() => {
                   setExpected(s.expected);
-                  scan(captureFrom(drawSample(s)));
+                  scan(captureFrom(drawSample(s)), parseAmount(s.expected)?.minor ?? null);
                 }}
               >
                 {s.label}
@@ -257,6 +390,23 @@ export default function App() {
             {" "}
             {shown.ms} ms{cloud && device && ` (device read first in ${device.ms} ms)`}
           </p>
+        )}
+        {phase === "done" && outcome?.canDispute && (
+          <div className="row">
+            <button disabled={!cloudConfigured || letterBusy} onClick={writeLetter}>
+              {letterBusy ? "Writing…" : "Write a note for the shop or bank"}
+            </button>
+          </div>
+        )}
+        {letter && (
+          <div className="letter">
+            <p className="hint">Only the amounts, shop name and time were sent to the cloud, not the photo.</p>
+            <textarea readOnly value={letter} rows={7} aria-label="Dispute note" />
+            <div className="row">
+              <button onClick={() => navigator.clipboard?.writeText(letter)}>Copy note</button>
+              <button onClick={() => speak(letter, true)}>Read it out</button>
+            </div>
+          </div>
         )}
       </section>
 
@@ -332,6 +482,7 @@ function describe(final: ReadResult, other: ReadResult | null, expectedMinor: nu
       headline: `Stop: shows ${shown}, you expected ${exp}`,
       detail: `Don't tap. The terminal shows ${shown}${where}, not ${exp}. Ask the cashier to correct it.` + disagreement,
       spoken: `Stop. Don't tap. The terminal shows ${said}. You expected ${spokenAmount(expectedMinor!, currency)}.`,
+      canDispute: true,
     };
   }
   return { tone: "info", headline: `Terminal shows ${shown}`, detail: `Amount${where}: ${shown}.` + disagreement, spoken: `The terminal shows ${said}${where}.` };

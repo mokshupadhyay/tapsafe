@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { compare, parseAmount, spokenAmount } from "./amount";
 import { parseReading } from "./schema";
 
-vi.mock("./firebase", () => ({ deviceFirstModel: {}, cloudModel: {}, cloudConfigured: false }));
+vi.mock("./firebase", () => ({ deviceFirstModel: {}, cloudModel: {}, billModel: {}, letterModel: {}, billFallbackModel: {}, letterFallbackModel: {}, cloudConfigured: false }));
 const { needsSecondOpinion } = await import("./reader");
 
 describe("parseAmount", () => {
