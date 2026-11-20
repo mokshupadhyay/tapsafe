@@ -1,5 +1,7 @@
 # TapSafe
 
+![TapSafe: hear the amount before you tap](docs/assets/cover.jpg)
+
 > Hear the amount on a card terminal before you tap. Built for blind and low-vision shoppers.
 
 **Hackathon:** #BuildHybridAI 2026 (Firebase AI Logic) · **Platform:** Web / Chrome · **Demo video:** _todo_ · **Live app:** https://sample-firebase-ai-app-cd689.web.app
@@ -92,3 +94,5 @@ All code was written after the submission period opened (11 Nov 2026). Scaffolde
 ## Team
 - Moksh Upadhyay
 - Vivek Verma
+
+Cover art generated with Gemini (Google AI Pro); all code and product design are ours.
