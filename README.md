@@ -2,7 +2,7 @@
 
 > Hear the amount on a card terminal before you tap. Built for blind and low-vision shoppers.
 
-**Hackathon:** #BuildHybridAI 2026 (Firebase AI Logic) · **Platform:** Web / Chrome · **Demo video:** _todo_ · **Live app:** _todo_
+**Hackathon:** #BuildHybridAI 2026 (Firebase AI Logic) · **Platform:** Web / Chrome · **Demo video:** _todo_ · **Live app:** https://sample-firebase-ai-app-cd689.web.app
 
 ## The problem
 Card terminals show the amount on a small screen and expect you to tap. A blind shopper can't read it, so they have to trust whoever is holding the terminal. An extra zero (₹1,800 instead of ₹180), a tip added without asking, or a "refund" screen that's really a sale all look the same to someone who can't see the screen.
