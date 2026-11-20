@@ -91,4 +91,4 @@ All code was written after the submission period opened (11 Nov 2026). Scaffolde
 
 ## Team
 - Moksh Upadhyay
-- Vivek [surname]
+- Vivek Verma
